@@ -1,0 +1,6 @@
+{
+  "summary": "Plano de implementação revisado para o Sistema de Recibos do Corpo de Bombeiros (6º GB / 3º SGB - B4), flexibilizando o processo de assinatura digital para escolha alternativa entre: (1) rubrica touch na tela do celular/computador OU (2) autenticação direta com conta Google/Gmail do militar receptor.",
+  "updatedAt": "2026-10-12T22:01:27.389424058Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

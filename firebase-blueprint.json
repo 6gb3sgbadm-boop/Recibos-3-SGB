@@ -1,0 +1,167 @@
+{
+  "entities": {
+    "Receipt": {
+      "title": "Receipt",
+      "description": "Recibo oficial de carga e descarga de materiais do Corpo de Bombeiros",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador único do recibo",
+          "maxLength": 128
+        },
+        "receiptNumber": {
+          "type": "string",
+          "description": "Número formatado oficial (ex: Recibo Nº 6GB-3ºSGB-B4-01/300/26)",
+          "maxLength": 100
+        },
+        "consecutiveNumber": {
+          "type": "number",
+          "description": "Número sequencial no ano"
+        },
+        "year": {
+          "type": "number",
+          "description": "Ano do exercício"
+        },
+        "date": {
+          "type": "string",
+          "description": "Data de emissão (DD/MM/AAAA)",
+          "maxLength": 20
+        },
+        "station": {
+          "type": "string",
+          "description": "Estação ou Posto de Bombeiros de destino",
+          "maxLength": 100
+        },
+        "deliveredBy": {
+          "type": "string",
+          "description": "Militar responsável pela entrega",
+          "maxLength": 120
+        },
+        "receivedBy": {
+          "type": "string",
+          "description": "Militar que recebeu os materiais",
+          "maxLength": 150
+        },
+        "items": {
+          "type": "array",
+          "description": "Lista de materiais transferidos"
+        },
+        "observations": {
+          "type": "string",
+          "description": "Observações complementares, estado de teste, etc.",
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string",
+          "description": "Status do recibo (pending ou signed)",
+          "enum": ["pending", "signed"]
+        },
+        "signatureMethod": {
+          "type": "string",
+          "description": "Método de assinatura utilizado",
+          "enum": ["none", "canvas", "google_auth"]
+        },
+        "signatureData": {
+          "type": "string",
+          "description": "Dados da rubrica em imagem base64",
+          "maxLength": 250000
+        },
+        "signerName": {
+          "type": "string",
+          "description": "Nome do militar signatário",
+          "maxLength": 150
+        },
+        "signerEmail": {
+          "type": "string",
+          "description": "E-mail Google do signatário se autenticado",
+          "maxLength": 150
+        },
+        "signedAt": {
+          "type": "string",
+          "description": "Data e hora ISO da assinatura",
+          "maxLength": 50
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp de criação"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp de atualização"
+        }
+      },
+      "required": ["id", "receiptNumber", "consecutiveNumber", "year", "date", "station", "deliveredBy", "status"]
+    },
+    "Station": {
+      "title": "Station",
+      "description": "Posto ou Estação de Bombeiros",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID da estação",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Nome do posto/estação",
+          "maxLength": 120
+        },
+        "code": {
+          "type": "string",
+          "description": "Código ou sigla operacional",
+          "maxLength": 50
+        },
+        "city": {
+          "type": "string",
+          "description": "Município",
+          "maxLength": 80
+        }
+      },
+      "required": ["id", "name"]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "Item do catálogo de materiais",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID do material",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Nome e especificação do material",
+          "maxLength": 250
+        },
+        "defaultUnit": {
+          "type": "string",
+          "description": "Unidade padrão",
+          "maxLength": 20
+        },
+        "category": {
+          "type": "string",
+          "description": "Categoria do material",
+          "maxLength": 80
+        }
+      },
+      "required": ["id", "name", "defaultUnit"]
+    }
+  },
+  "firestore": {
+    "/receipts/{receiptId}": {
+      "schema": "Receipt",
+      "description": "Coleção de recibos oficiais de materiais do Corpo de Bombeiros"
+    },
+    "/stations/{stationId}": {
+      "schema": "Station",
+      "description": "Cadastro e gerenciamento de estações de bombeiros"
+    },
+    "/materials/{materialId}": {
+      "schema": "Material",
+      "description": "Catálogo dinâmico de materiais frequentes do quartel"
+    }
+  }
+}

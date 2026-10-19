@@ -1,0 +1,8 @@
+{
+  "name": "Sistema de Recibos B4 - Corpo de Bombeiros",
+  "description": "Sistema de controle, geração, assinatura digital (touch ou Google) e impressão oficial de recibos de material do Corpo de Bombeiros.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
