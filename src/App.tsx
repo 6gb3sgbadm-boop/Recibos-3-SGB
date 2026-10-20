@@ -544,7 +544,7 @@ export default function App() {
           onOpenMobileView={(id) => {
             setReceiptForSign(null);
             setMobileDirectReceiptId(id);
-            window.history.pushState({}, '', `/?recibo=${id}`);
+            window.history.pushState({}, '', `${window.location.pathname}?recibo=${id}`);
           }}
           onConfirmSignature={handleConfirmSignature}
         />

@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: '/Recibos-3-SGB/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

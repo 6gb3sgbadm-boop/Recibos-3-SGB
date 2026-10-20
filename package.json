@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
+    "restore:aistudio": "bash scripts/restore-aistudio.sh",
+    "mode:github-pages": "bash scripts/apply-github-pages.sh",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

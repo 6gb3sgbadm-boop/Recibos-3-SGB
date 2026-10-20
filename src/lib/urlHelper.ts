@@ -45,9 +45,10 @@ export function getReceiptPublicUrl(receiptId: string): string {
     return `${PUBLIC_APP_URL}/?recibo=${encodeURIComponent(receiptId)}`;
   }
 
-  // If already running on the public domain (ais-pre) or any custom deployed host
-  const cleanOrigin = origin.replace(/\/+$/, '');
-  return `${cleanOrigin}/?recibo=${encodeURIComponent(receiptId)}`;
+  // If already running on the public domain, GitHub Pages subfolder or custom deployed host
+  const currentPath = window.location.pathname.replace(/index\.html$/i, '');
+  const cleanPath = currentPath.endsWith('/') ? currentPath : `${currentPath}/`;
+  return `${window.location.origin}${cleanPath}?recibo=${encodeURIComponent(receiptId)}`;
 }
 
 // Backward compatibility helpers
