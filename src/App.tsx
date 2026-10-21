@@ -14,9 +14,10 @@ import {
   query, 
   orderBy 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, testConnection } from './lib/firebase';
-import { Receipt, StationItem, CatalogMaterialItem } from './types/receipt';
-import { INITIAL_STATIONS, INITIAL_CATALOG_MATERIALS } from './data/defaults';
+import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import { db, auth, googleProvider, handleFirestoreError, OperationType, testConnection } from './lib/firebase';
+import { Receipt, StationItem, CatalogMaterialItem, AuthorizedUser } from './types/receipt';
+import { INITIAL_STATIONS, INITIAL_CATALOG_MATERIALS, OWNER_EMAIL } from './data/defaults';
 import { seedDefaultDatabase, forceRestoreAllDefaults } from './lib/seedDatabase';
 import { Navbar } from './components/Navbar';
 import { ReceiptsTable } from './components/ReceiptsTable';
@@ -26,18 +27,28 @@ import { NewReceiptModal } from './components/NewReceiptModal';
 import { MobileSignatureView } from './components/MobileSignatureView';
 import { StationsView, CatalogView } from './components/AuxiliaryViews';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
+import { UserManagementModal } from './components/UserManagementModal';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
 export default function App() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [stations, setStations] = useState<StationItem[]>(INITIAL_STATIONS);
   const [materials, setMaterials] = useState<CatalogMaterialItem[]>(INITIAL_CATALOG_MATERIALS);
+  const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
+
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
 
   // Deletion modal state
   const [receiptToDelete, setReceiptToDelete] = useState<Receipt | null>(null);
   const [isDeletingReceipt, setIsDeletingReceipt] = useState(false);
+
+  // User management modal state
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+
+  // Station filter passed from Stations view
+  const [selectedStationFilter, setSelectedStationFilter] = useState<string>('ALL');
 
   // Navigation and active views
   const [currentNav, setCurrentNav] = useState<'receipts' | 'stations' | 'catalog'>('receipts');
@@ -53,6 +64,21 @@ export default function App() {
   const [mobileReceipt, setMobileReceipt] = useState<Receipt | null>(null);
   const [mobileLoading, setMobileLoading] = useState(false);
   const [mobileNotFound, setMobileNotFound] = useState(false);
+
+  // Listen to Auth State
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsub();
+  }, []);
+
+  // Compute permissions
+  const userEmail = currentUser?.email?.toLowerCase();
+  const isOwner = userEmail === OWNER_EMAIL.toLowerCase();
+  const authUserRecord = authorizedUsers.find((u) => u.email.toLowerCase() === userEmail);
+  const canCreateReceipts = isOwner || !!authUserRecord?.canCreateReceipts;
+  const canDeleteReceipts = isOwner || !!authUserRecord?.canDeleteReceipts;
 
   // Check URL query parameters for direct mobile sign links and fetch document directly
   useEffect(() => {
@@ -85,9 +111,8 @@ export default function App() {
     }
   }, []);
 
-  // Initialize, auto-seed defaults and subscribe to Firestore receipts, stations and materials in real-time
+  // Initialize, auto-seed defaults and subscribe to Firestore receipts, stations, materials and authorized users
   useEffect(() => {
-    // Timeout de segurança para nunca travar a interface carregando
     const safetyTimer = setTimeout(() => {
       setLoading(false);
     }, 1200);
@@ -122,7 +147,7 @@ export default function App() {
       }
     );
 
-    // 2. Stations Listener: combine Firestore items with initial stations to prevent accidental disappearances
+    // 2. Stations Listener
     const stationsCollection = collection(db, 'stations');
     const unsubStations = onSnapshot(
       stationsCollection,
@@ -132,7 +157,6 @@ export default function App() {
           firestoreList.push({ ...docSnap.data(), id: docSnap.id } as StationItem);
         });
 
-        // Use a Map keyed by lowercase station name to merge Firestore additions with INITIAL_STATIONS
         const map = new Map<string, StationItem>();
         INITIAL_STATIONS.forEach((st) => map.set(st.name.toLowerCase().trim(), st));
         firestoreList.forEach((st) => map.set(st.name.toLowerCase().trim(), st));
@@ -141,7 +165,7 @@ export default function App() {
       (err) => console.warn('Sync stations:', err)
     );
 
-    // 3. Materials Catalog Listener: combine Firestore items with initial catalog materials
+    // 3. Materials Catalog Listener
     const materialsCollection = collection(db, 'materials');
     const unsubMaterials = onSnapshot(
       materialsCollection,
@@ -159,10 +183,25 @@ export default function App() {
       (err) => console.warn('Sync materials:', err)
     );
 
+    // 4. Authorized Users Listener (RBAC)
+    const authUsersCollection = collection(db, 'authorized_users');
+    const unsubAuthUsers = onSnapshot(
+      authUsersCollection,
+      (snapshot) => {
+        const list: AuthorizedUser[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ ...docSnap.data(), id: docSnap.id } as AuthorizedUser);
+        });
+        setAuthorizedUsers(list);
+      },
+      (err) => console.warn('Sync authorized users:', err)
+    );
+
     return () => {
       unsubReceipts();
       unsubStations();
       unsubMaterials();
+      unsubAuthUsers();
     };
   }, []);
 
@@ -173,49 +212,124 @@ export default function App() {
     return Math.max(...receiptsOfYear.map((r) => r.consecutiveNumber || 0)) + 1;
   };
 
+  // Google Login / Logout handlers
+  const handleLoginGoogle = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      if (e.code !== 'auth/popup-closed-by-user') {
+        alert('Erro ao autenticar com Google: ' + (e.message || 'Falha na conexão'));
+      }
+    }
+  };
+
+  const handleLogoutGoogle = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Erro ao sair:', err);
+    }
+  };
+
+  // Open New Receipt modal after verifying authorization
+  const handleOpenNewReceiptWithCheck = async () => {
+    if (!currentUser) {
+      const confirmLogin = window.confirm(
+        'A emissão de novos recibos é restrita a usuários autorizados.\n\nDeseja conectar com sua conta Google agora para verificar seu acesso?'
+      );
+      if (!confirmLogin) return;
+
+      try {
+        const res = await signInWithPopup(auth, googleProvider);
+        const email = res.user.email?.toLowerCase();
+        const allowed = email === OWNER_EMAIL.toLowerCase() || authorizedUsers.some((u) => u.email.toLowerCase() === email && u.canCreateReceipts);
+        if (allowed) {
+          setPrefilledMaterial(undefined);
+          setIsNewModalOpen(true);
+        } else {
+          alert(`A conta conectada (${res.user.email}) não possui permissão para emitir novos recibos.\n\nSolicite liberação ao proprietário (${OWNER_EMAIL}).`);
+        }
+      } catch (err: unknown) {
+        const e = err as { code?: string };
+        if (e.code !== 'auth/popup-closed-by-user') {
+          console.error(err);
+        }
+      }
+      return;
+    }
+
+    if (!canCreateReceipts) {
+      alert(
+        `Apenas usuários autorizados pelo proprietário têm permissão para gerar novos recibos.\n\nSua conta (${currentUser.email}) não possui permissão de emissão.\nSolicite liberação ao administrador (${OWNER_EMAIL}).`
+      );
+      return;
+    }
+
+    setPrefilledMaterial(undefined);
+    setIsNewModalOpen(true);
+  };
+
+  // User Management Actions (Firestore RBAC)
+  const handleAddAuthorizedUser = async (data: Omit<AuthorizedUser, 'id' | 'addedAt' | 'addedBy'>) => {
+    const emailNorm = data.email.toLowerCase().trim();
+    const docRef = doc(db, 'authorized_users', emailNorm);
+    const payload: AuthorizedUser = {
+      ...data,
+      id: emailNorm,
+      email: emailNorm,
+      addedAt: new Date().toISOString(),
+      addedBy: currentUser?.email || OWNER_EMAIL,
+    };
+    await setDoc(docRef, payload);
+  };
+
+  const handleUpdateAuthorizedUser = async (id: string, updates: Partial<AuthorizedUser>) => {
+    const docRef = doc(db, 'authorized_users', id);
+    await updateDoc(docRef, updates);
+  };
+
+  const handleRemoveAuthorizedUser = async (id: string) => {
+    const docRef = doc(db, 'authorized_users', id);
+    await deleteDoc(docRef);
+  };
+
   // Handle Save New Receipt (instantâneo e não trava no 'Gravando...')
   const handleSaveNewReceipt = async (
     receiptData: Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'>,
     shouldOpenSignModal?: boolean
   ): Promise<Receipt> => {
-    const docId = `recibo_6gb_3sgb_b4_${receiptData.consecutiveNumber}_${receiptData.year}`;
+    const docId = `recibo_6gb_3sgb_b4_${receiptData.consecutiveNumber}_${receiptData.year}_${Date.now()}`;
     const nowIso = new Date().toISOString();
 
-    const fullReceipt: Receipt = {
+    const createdReceipt: Receipt = {
       ...receiptData,
       id: docId,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
 
-    // Atualização otimista imediata no estado local
+    // Atualização otimista imediata na tabela local para que apareça sem nenhum atraso
     setReceipts((prev) => {
       const exists = prev.some((r) => r.id === docId);
-      if (exists) return prev.map((r) => (r.id === docId ? fullReceipt : r));
-      return [fullReceipt, ...prev];
+      if (exists) return prev;
+      return [createdReceipt, ...prev];
     });
 
     if (shouldOpenSignModal) {
-      setReceiptForSign(fullReceipt);
+      setReceiptForSign(createdReceipt);
     }
 
-    try {
-      // Dispara persistência no Firestore sem travar o modal indefinidamente
-      const writePromise = setDoc(doc(db, 'receipts', docId), fullReceipt);
-      await Promise.race([
-        writePromise,
-        new Promise((resolve) => setTimeout(resolve, 300)),
-      ]);
-    } catch (err: unknown) {
-      console.warn('Persistência Firestore em segundo plano:', err);
-      try {
-        handleFirestoreError(err, OperationType.CREATE, `receipts/${docId}`);
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    // Persistência assíncrona no Firestore sem travar a interface
+    const savePromise = setDoc(doc(db, 'receipts', docId), createdReceipt);
+    await Promise.race([
+      savePromise,
+      new Promise((resolve) => setTimeout(resolve, 500)),
+    ]).catch((err) => {
+      console.warn('Persistência em segundo plano:', err);
+    });
 
-    return fullReceipt;
+    return createdReceipt;
   };
 
   // Handle Confirm Signature (Touch canvas or Google account)
@@ -257,7 +371,6 @@ export default function App() {
     }
 
     try {
-      // Salva o recibo completo atualizado com merge: true para garantir que nunca seja perdido
       const updatePromise = setDoc(doc(db, 'receipts', target.id), updatedReceipt, { merge: true });
       await Promise.race([
         updatePromise,
@@ -273,7 +386,7 @@ export default function App() {
     }
   };
 
-  // Handle Delete Receipt (opens in-app confirmation modal for any receipt)
+  // Handle Delete Receipt
   const handleDeleteReceipt = (rc: Receipt) => {
     setReceiptToDelete(rc);
   };
@@ -302,113 +415,85 @@ export default function App() {
     }
   };
 
-  // Station CRUD Handlers
-  const handleAddStation = async (stationData: Omit<StationItem, 'id'>) => {
+  // Stations Operations
+  const handleAddStation = async (newSt: Omit<StationItem, 'id'>) => {
     const id = `st_${Date.now()}`;
-    const newStation: StationItem = { ...stationData, id };
-    setStations((prev) => [...prev, newStation]);
-    try {
-      await setDoc(doc(db, 'stations', id), newStation);
-    } catch (err) {
-      console.warn('Persist station error:', err);
-    }
+    const stationItem: StationItem = { ...newSt, id };
+    setStations((prev) => [...prev, stationItem]);
+    await setDoc(doc(db, 'stations', id), stationItem);
   };
 
-  const handleEditStation = async (stationData: StationItem) => {
-    setStations((prev) => prev.map((s) => (s.id === stationData.id ? stationData : s)));
-    try {
-      await setDoc(doc(db, 'stations', stationData.id), stationData);
-    } catch (err) {
-      console.warn('Persist edit station error:', err);
-    }
+  const handleEditStation = async (st: StationItem) => {
+    setStations((prev) => prev.map((item) => (item.id === st.id ? st : item)));
+    await setDoc(doc(db, 'stations', st.id), st, { merge: true });
   };
 
-  const handleDeleteStation = async (stationId: string) => {
-    setStations((prev) => prev.filter((s) => s.id !== stationId));
-    try {
-      await deleteDoc(doc(db, 'stations', stationId));
-    } catch (err) {
-      console.warn('Delete station error:', err);
-    }
+  const handleDeleteStation = async (id: string) => {
+    setStations((prev) => prev.filter((st) => st.id !== id));
+    await deleteDoc(doc(db, 'stations', id));
   };
 
-  // Materials CRUD Handlers
-  const handleAddMaterial = async (materialData: Omit<CatalogMaterialItem, 'id'>) => {
+  // Materials Operations
+  const handleAddMaterial = async (newMat: Omit<CatalogMaterialItem, 'id'>) => {
     const id = `mat_${Date.now()}`;
-    const newMat: CatalogMaterialItem = { ...materialData, id };
-    setMaterials((prev) => [newMat, ...prev]);
-    try {
-      await setDoc(doc(db, 'materials', id), newMat);
-    } catch (err) {
-      console.warn('Persist material error:', err);
-    }
+    const materialItem: CatalogMaterialItem = { ...newMat, id };
+    setMaterials((prev) => [...prev, materialItem]);
+    await setDoc(doc(db, 'materials', id), materialItem);
   };
 
-  const handleEditMaterial = async (materialData: CatalogMaterialItem) => {
-    setMaterials((prev) => prev.map((m) => (m.id === materialData.id ? materialData : m)));
-    try {
-      await setDoc(doc(db, 'materials', materialData.id), materialData);
-    } catch (err) {
-      console.warn('Persist edit material error:', err);
-    }
+  const handleEditMaterial = async (mat: CatalogMaterialItem) => {
+    setMaterials((prev) => prev.map((item) => (item.id === mat.id ? mat : item)));
+    await setDoc(doc(db, 'materials', mat.id), mat, { merge: true });
   };
 
-  const handleDeleteMaterial = async (materialId: string) => {
-    setMaterials((prev) => prev.filter((m) => m.id !== materialId));
-    try {
-      await deleteDoc(doc(db, 'materials', materialId));
-    } catch (err) {
-      console.warn('Delete material error:', err);
-    }
+  const handleDeleteMaterial = async (id: string) => {
+    setMaterials((prev) => prev.filter((m) => m.id !== id));
+    await deleteDoc(doc(db, 'materials', id));
   };
 
   const handleRestoreStationsAndMaterials = async () => {
     await forceRestoreAllDefaults();
   };
 
-  // Direct Mobile Signing view resolution
-  const currentMobileReceipt = mobileReceipt || (mobileDirectReceiptId 
-    ? receipts.find((r) => r.id === mobileDirectReceiptId)
-    : null);
-
+  // Direct Mobile URL Rendering
   if (mobileDirectReceiptId) {
-    if (mobileLoading && !currentMobileReceipt) {
+    if (mobileLoading) {
       return (
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white space-y-4">
-          <Loader2 className="w-10 h-10 text-red-500 animate-spin" />
-          <h2 className="text-base font-bold">Carregando Recibo de Material...</h2>
-          <p className="text-xs text-slate-400 font-mono">6º GB · 3º SGB · B4 Almoxarifado</p>
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
+          <Loader2 className="w-8 h-8 text-red-500 animate-spin mb-4" />
+          <h2 className="text-base font-bold">Localizando recibo no banco de dados...</h2>
+          <p className="text-xs text-slate-400 mt-1">6º Grupamento de Bombeiros · B4</p>
         </div>
       );
     }
 
-    if (mobileNotFound && !currentMobileReceipt) {
+    if (mobileNotFound && !mobileReceipt) {
       return (
-        <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-slate-900 text-center space-y-4">
-          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
-            <AlertCircle className="w-8 h-8" />
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white text-center">
+          <div className="w-12 h-12 rounded-full bg-red-950/80 border border-red-800 flex items-center justify-center text-red-400 mb-4">
+            <AlertCircle className="w-6 h-6" />
           </div>
           <h2 className="text-lg font-bold">Recibo Não Encontrado</h2>
-          <p className="text-xs text-slate-600 max-w-sm">
-            O recibo solicitado não foi localizado no banco de dados ou foi excluído pelo almoxarifado.
+          <p className="text-xs text-slate-400 max-w-sm mt-2 leading-relaxed">
+            O documento solicitado não foi localizado ou foi removido do banco de dados oficial do B4.
           </p>
           <button
             onClick={() => {
               setMobileDirectReceiptId(null);
               window.history.pushState({}, '', window.location.pathname);
             }}
-            className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow transition-colors"
+            className="mt-6 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition"
           >
-            Acessar Painel Principal
+            Voltar ao Painel Geral
           </button>
         </div>
       );
     }
 
-    if (currentMobileReceipt) {
+    if (mobileReceipt) {
       return (
         <MobileSignatureView
-          receipt={currentMobileReceipt}
+          receipt={mobileReceipt}
           onConfirmSignature={handleConfirmSignature}
           onBackToApp={() => {
             setMobileDirectReceiptId(null);
@@ -420,22 +505,23 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900">
       
-      {/* Institutional Top Navbar */}
-      <div className="no-print">
-        <Navbar
-          onOpenNewReceipt={() => {
-            setPrefilledMaterial(undefined);
-            setIsNewModalOpen(true);
-          }}
-          onSelectNav={(nav) => setCurrentNav(nav)}
-          currentNav={currentNav}
-        />
-      </div>
+      {/* Navbar with Access Management and Auth Status */}
+      <Navbar
+        currentUser={currentUser}
+        isOwner={isOwner}
+        canCreateReceipts={canCreateReceipts}
+        onOpenNewReceipt={handleOpenNewReceiptWithCheck}
+        onOpenUserManagement={() => setIsUserManagementOpen(true)}
+        onLoginGoogle={handleLoginGoogle}
+        onLogoutGoogle={handleLogoutGoogle}
+        onSelectNav={(nav) => setCurrentNav(nav)}
+        currentNav={currentNav}
+      />
 
-      {/* Main Content Viewport */}
-      <main className="no-print flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* Main Container */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex-1 w-full space-y-6">
         
         {/* Error notification banner if DB disconnected */}
         {dbError && (
@@ -468,13 +554,13 @@ export default function App() {
               <ReceiptsTable
                 receipts={receipts}
                 stations={stations}
+                selectedStationFilter={selectedStationFilter}
+                onStationFilterChange={setSelectedStationFilter}
+                canCreateReceipts={canCreateReceipts}
                 onViewPrint={(rc) => setReceiptForPrint(rc)}
                 onOpenSignature={(rc) => setReceiptForSign(rc)}
                 onDeleteReceipt={handleDeleteReceipt}
-                onOpenNewReceipt={() => {
-                  setPrefilledMaterial(undefined);
-                  setIsNewModalOpen(true);
-                }}
+                onOpenNewReceipt={handleOpenNewReceiptWithCheck}
               />
             )}
 
@@ -483,7 +569,8 @@ export default function App() {
               <StationsView
                 stations={stations}
                 receipts={receipts}
-                onSelectStationFilter={() => {
+                onSelectStationFilter={(stationName) => {
+                  setSelectedStationFilter(stationName);
                   setCurrentNav('receipts');
                 }}
                 onAddStation={handleAddStation}
@@ -504,6 +591,10 @@ export default function App() {
                 onRestoreDefaults={handleRestoreStationsAndMaterials}
                 onClose={() => setCurrentNav('receipts')}
                 onOpenNewReceiptWithMaterial={(mat) => {
+                  if (!canCreateReceipts) {
+                    handleOpenNewReceiptWithCheck();
+                    return;
+                  }
                   setPrefilledMaterial(mat);
                   setIsNewModalOpen(true);
                 }}
@@ -567,15 +658,27 @@ export default function App() {
           title={receiptToDelete.status === 'signed' ? 'Excluir Recibo Assinado' : 'Excluir Recibo de Material'}
           message={
             receiptToDelete.status === 'signed'
-              ? `Atenção: O ${receiptToDelete.receiptNumber} já possui assinatura digital registrada. Como encarregado do B4, confirma a exclusão definitiva deste registro do banco de dados?`
+              ? `Atenção: O ${receiptToDelete.receiptNumber} já possui assinatura digital registrada. Confirma a exclusão definitiva deste registro do banco de dados?`
               : `Deseja realmente excluir o ${receiptToDelete.receiptNumber} (${receiptToDelete.station})? Esta ação não poderá ser desfeita.`
           }
           itemName={`${receiptToDelete.receiptNumber} - ${receiptToDelete.station}`}
           isDeleting={isDeletingReceipt}
+          authorizedUsers={authorizedUsers}
           onConfirm={handleConfirmDeleteReceipt}
           onCancel={() => setReceiptToDelete(null)}
         />
       )}
+
+      {/* Modal: User & Permissions Management (RBAC) */}
+      <UserManagementModal
+        isOpen={isUserManagementOpen}
+        currentUser={currentUser}
+        authorizedUsers={authorizedUsers}
+        onAddAuthorizedUser={handleAddAuthorizedUser}
+        onUpdateAuthorizedUser={handleUpdateAuthorizedUser}
+        onRemoveAuthorizedUser={handleRemoveAuthorizedUser}
+        onClose={() => setIsUserManagementOpen(false)}
+      />
 
       {/* Institutional Footer */}
       <footer className="no-print bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">

@@ -12,6 +12,7 @@ import {
 import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { OWNER_EMAIL } from '../data/defaults';
+import { AuthorizedUser } from '../types/receipt';
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ interface DeleteConfirmModalProps {
   message: string;
   itemName?: string;
   isDeleting?: boolean;
+  authorizedUsers?: AuthorizedUser[];
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -29,6 +31,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   message,
   itemName,
   isDeleting,
+  authorizedUsers,
   onConfirm,
   onCancel,
 }) => {
@@ -45,7 +48,13 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 
   if (!isOpen) return null;
 
-  const isOwner = currentUser?.email?.toLowerCase() === OWNER_EMAIL.toLowerCase();
+  const userEmail = currentUser?.email?.toLowerCase();
+  const isOwner = userEmail === OWNER_EMAIL.toLowerCase();
+  const isAuthorizedUser = !!(
+    authorizedUsers &&
+    authorizedUsers.some((u) => u.email.toLowerCase() === userEmail && u.canDeleteReceipts)
+  );
+  const hasDeletePermission = isOwner || isAuthorizedUser;
 
   const handleGoogleOwnerLogin = async () => {
     setIsAuthenticating(true);
@@ -55,9 +64,14 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
       const res = await signInWithPopup(auth, googleProvider);
       const email = res.user.email?.toLowerCase();
       
-      if (email !== OWNER_EMAIL.toLowerCase()) {
+      const authorized = email === OWNER_EMAIL.toLowerCase() || !!(
+        authorizedUsers &&
+        authorizedUsers.some((u) => u.email.toLowerCase() === email && u.canDeleteReceipts)
+      );
+
+      if (!authorized) {
         setAuthError(
-          `Acesso não autorizado: A conta conectada (${res.user.email}) não é o proprietário cadastrado (${OWNER_EMAIL}). Apenas o proprietário pode excluir recibos.`
+          `Acesso não autorizado: A conta conectada (${res.user.email}) não possui permissão para excluir recibos. Apenas o proprietário (${OWNER_EMAIL}) ou usuários autorizados podem excluir.`
         );
       }
     } catch (err: unknown) {
@@ -118,13 +132,15 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
             </div>
           )}
 
-          {/* Painel de Validação do Proprietário */}
-          {isOwner ? (
+          {/* Painel de Validação do Proprietário ou Usuário Autorizado */}
+          {hasDeletePermission ? (
             <div className="p-3.5 bg-emerald-50/80 border border-emerald-200 rounded-xl space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-emerald-800">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="text-xs font-bold">Proprietário Verificado</span>
+                  <span className="text-xs font-bold">
+                    {isOwner ? 'Proprietário Verificado' : 'Usuário Autorizado para Exclusão'}
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -138,7 +154,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
               </div>
               <p className="text-[11px] text-emerald-700 leading-tight">
                 Identidade autenticada como <strong className="font-semibold text-emerald-900">{currentUser?.email}</strong>. 
-                Sua permissão administrativa para exclusão está desbloqueada.
+                Sua permissão para exclusão de recibos está autorizada.
               </p>
             </div>
           ) : (
@@ -147,13 +163,10 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
                 <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="text-xs font-bold text-amber-900">
-                    Ação Restrita ao Proprietário
+                    Ação Restrita a Usuários Autorizados
                   </p>
                   <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Usuários finais ou receptores <strong>não podem excluir recibos</strong>. Para prosseguir, autentique-se com a conta proprietária:
-                    <span className="block font-mono font-bold text-slate-900 mt-0.5">
-                      {OWNER_EMAIL}
-                    </span>
+                    A exclusão de recibos é permitida apenas ao <strong>proprietário ({OWNER_EMAIL})</strong> ou a <strong>usuários expressamente autorizados</strong> no painel de gestão.
                   </p>
                 </div>
               </div>
@@ -196,7 +209,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
                         d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                       />
                     </svg>
-                    <span>Autenticar como Proprietário ({OWNER_EMAIL})</span>
+                    <span>Entrar com Conta Google Autorizada</span>
                   </>
                 )}
               </button>
@@ -225,7 +238,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
               Cancelar
             </button>
 
-            {isOwner ? (
+            {hasDeletePermission ? (
               <button
                 type="button"
                 disabled={isDeleting}
@@ -240,7 +253,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
                 type="button"
                 disabled={true}
                 className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-slate-400 bg-slate-200 rounded-lg cursor-not-allowed"
-                title="Autentique-se como proprietário acima para habilitar a exclusão"
+                title="Autentique-se com conta autorizada para habilitar a exclusão"
               >
                 <Lock className="w-3.5 h-3.5" />
                 Exclusão Bloqueada

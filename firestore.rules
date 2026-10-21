@@ -12,6 +12,18 @@ service cloud.firestore {
         && request.auth.token.email.matches('(?i)^6gb3sgbadm@gmail\\.com$');
     }
 
+    function isAuthorizedToDelete() {
+      return request.auth != null 
+        && request.auth.token.email != null 
+        && (
+          isOwner() ||
+          (
+            exists(/databases/$(database)/documents/authorized_users/$(request.auth.token.email.lower())) &&
+            get(/databases/$(database)/documents/authorized_users/$(request.auth.token.email.lower())).data.canDeleteReceipts == true
+          )
+        );
+    }
+
     function isValidReceipt(data) {
       return data.id is string
         && data.receiptNumber is string
@@ -36,8 +48,15 @@ service cloud.firestore {
       allow create: if isValidReceipt(incoming());
       allow update: if isValidReceipt(incoming());
 
-      // Exclusão protegida: restrita exclusivamente ao proprietário encarregado (6gb3sgbadm@gmail.com)
-      allow delete: if isOwner();
+      // Exclusão protegida: proprietário ou usuários autorizados no painel
+      allow delete: if isAuthorizedToDelete();
+    }
+
+    match /authorized_users/{userId} {
+      // Leitura pública para sincronização de permissões na interface
+      allow read: if true;
+      // Gerenciamento restrito exclusivamente ao proprietário
+      allow write: if isOwner();
     }
 
     match /stations/{stationId} {

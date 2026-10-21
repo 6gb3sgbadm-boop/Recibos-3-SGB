@@ -8,7 +8,8 @@ import {
   Download, 
   Trash2, 
   Eye,
-  Plus
+  Plus,
+  X
 } from 'lucide-react';
 import { Receipt, StationItem } from '../types/receipt';
 import { STATIONS_PRESET } from '../data/defaults';
@@ -16,22 +17,36 @@ import { STATIONS_PRESET } from '../data/defaults';
 interface ReceiptsTableProps {
   receipts: Receipt[];
   stations?: StationItem[];
+  selectedStationFilter?: string;
+  onStationFilterChange?: (station: string) => void;
   onViewPrint: (receipt: Receipt) => void;
   onOpenSignature: (receipt: Receipt) => void;
   onDeleteReceipt: (receipt: Receipt) => void;
   onOpenNewReceipt: () => void;
+  canCreateReceipts?: boolean;
 }
 
 export const ReceiptsTable: React.FC<ReceiptsTableProps> = ({
   receipts,
   stations,
+  selectedStationFilter,
+  onStationFilterChange,
   onViewPrint,
   onOpenSignature,
   onDeleteReceipt,
   onOpenNewReceipt,
+  canCreateReceipts,
 }) => {
   // Consultation filters
-  const [stationFilter, setStationFilter] = useState('ALL');
+  const [internalStationFilter, setInternalStationFilter] = useState('ALL');
+  const stationFilter = selectedStationFilter !== undefined ? selectedStationFilter : internalStationFilter;
+
+  const setStationFilter = (val: string) => {
+    setInternalStationFilter(val);
+    if (onStationFilterChange) {
+      onStationFilterChange(val);
+    }
+  };
   const [militaryFilter, setMilitaryFilter] = useState('');
   const [materialFilter, setMaterialFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'pending' | 'signed'>('ALL');
@@ -184,14 +199,28 @@ export const ReceiptsTable: React.FC<ReceiptsTableProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {stationFilter !== 'ALL' && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-semibold">
+                <span>Posto: <strong>{stationFilter}</strong></span>
+                <button
+                  type="button"
+                  onClick={() => setStationFilter('ALL')}
+                  className="p-0.5 hover:bg-red-200 rounded text-red-600 transition"
+                  title="Remover filtro de posto"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {hasActiveFilters && (
               <button
                 type="button"
                 onClick={handleClearFilters}
                 className="text-xs text-red-600 hover:text-red-700 font-semibold px-2 py-1 hover:bg-red-50 rounded transition-colors"
               >
-                Limpar Todos os Filtros
+                Limpar Filtros
               </button>
             )}
 

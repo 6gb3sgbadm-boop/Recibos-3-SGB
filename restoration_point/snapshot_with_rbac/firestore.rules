@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isOwner() {
+      return request.auth != null 
+        && request.auth.token.email != null 
+        && request.auth.token.email.matches('(?i)^6gb3sgbadm@gmail\\.com$');
+    }
+
+    function isAuthorizedToDelete() {
+      return request.auth != null 
+        && request.auth.token.email != null 
+        && (
+          isOwner() ||
+          (
+            exists(/databases/$(database)/documents/authorized_users/$(request.auth.token.email.lower())) &&
+            get(/databases/$(database)/documents/authorized_users/$(request.auth.token.email.lower())).data.canDeleteReceipts == true
+          )
+        );
+    }
+
+    function isValidReceipt(data) {
+      return data.id is string
+        && data.receiptNumber is string
+        && data.consecutiveNumber is number
+        && data.year is number
+        && data.date is string
+        && data.station is string
+        && data.deliveredBy is string
+        && data.status in ['pending', 'signed'];
+    }
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /receipts/{receiptId} {
+      // Leitura pública para consulta no painel e leitura de QR Code em viaturas/postos
+      allow read: if true;
+      
+      // Criação e atualização de recibos e assinaturas digitais
+      allow create: if isValidReceipt(incoming());
+      allow update: if isValidReceipt(incoming());
+
+      // Exclusão protegida: proprietário ou usuários autorizados no painel
+      allow delete: if isAuthorizedToDelete();
+    }
+
+    match /authorized_users/{userId} {
+      // Leitura pública para sincronização de permissões na interface
+      allow read: if true;
+      // Gerenciamento restrito exclusivamente ao proprietário
+      allow write: if isOwner();
+    }
+
+    match /stations/{stationId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /materials/{materialId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

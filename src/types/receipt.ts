@@ -43,3 +43,14 @@ export interface CatalogMaterialItem {
   defaultUnit: string;
   category?: string;
 }
+
+export interface AuthorizedUser {
+  id: string;
+  email: string;
+  name?: string;
+  canCreateReceipts: boolean;
+  canDeleteReceipts: boolean;
+  addedAt: string;
+  addedBy: string;
+}
+
